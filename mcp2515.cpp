@@ -1,5 +1,10 @@
-#include "Arduino.h"
 #include "mcp2515.h"
+
+#if MCP2515_HAVE_ARDUINO
+#include "Arduino.h"
+#else
+#include <string.h>   /* memset, memcpy -- pulled in by Arduino.h otherwise */
+#endif
 
 const struct MCP2515::TXBn_REGS MCP2515::TXB[MCP2515::N_TXBUFFERS] = {
     {MCP_TXB0CTRL, MCP_TXB0SIDH, MCP_TXB0DATA},
@@ -11,6 +16,40 @@ const struct MCP2515::RXBn_REGS MCP2515::RXB[N_RXBUFFERS] = {
     {MCP_RXB0CTRL, MCP_RXB0SIDH, MCP_RXB0DATA, CANINTF_RX0IF},
     {MCP_RXB1CTRL, MCP_RXB1SIDH, MCP_RXB1DATA, CANINTF_RX1IF}
 };
+
+#if MCP2515_HAVE_ARDUINO
+
+/*
+ * Built-in Arduino backend. `ctx` is the MCP2515 instance itself, so these
+ * reach the SPIn/SPICS/SPI_CLOCK members through a cast rather than needing
+ * any separate allocation.
+ */
+
+void MCP2515::arduinoSelect(void *ctx) {
+    MCP2515 *self = static_cast<MCP2515 *>(ctx);
+    self->SPIn->beginTransaction(SPISettings(self->SPI_CLOCK, MSBFIRST, SPI_MODE0));
+    digitalWrite(self->SPICS, LOW);
+}
+
+void MCP2515::arduinoDeselect(void *ctx) {
+    MCP2515 *self = static_cast<MCP2515 *>(ctx);
+    digitalWrite(self->SPICS, HIGH);
+    self->SPIn->endTransaction();
+}
+
+uint8_t MCP2515::arduinoTransfer(void *ctx, uint8_t tx) {
+    return static_cast<MCP2515 *>(ctx)->SPIn->transfer(tx);
+}
+
+void MCP2515::arduinoDelayMs(void *ctx, uint32_t ms) {
+    (void) ctx;
+    delay(ms);
+}
+
+uint32_t MCP2515::arduinoTicksMs(void *ctx) {
+    (void) ctx;
+    return (uint32_t) millis();
+}
 
 MCP2515::MCP2515(const uint8_t _CS, const uint32_t _SPI_CLOCK, SPIClass * _SPI)
 {
@@ -26,25 +65,63 @@ MCP2515::MCP2515(const uint8_t _CS, const uint32_t _SPI_CLOCK, SPIClass * _SPI)
     SPI_CLOCK = _SPI_CLOCK;
     pinMode(SPICS, OUTPUT);
     digitalWrite(SPICS, HIGH);
+
+    port.select          = &MCP2515::arduinoSelect;
+    port.deselect        = &MCP2515::arduinoDeselect;
+    port.transfer        = &MCP2515::arduinoTransfer;
+    port.transfer_buffer = nullptr;   /* Arduino SPI is byte-at-a-time anyway */
+    port.delay_ms        = &MCP2515::arduinoDelayMs;
+    port.ticks_ms        = &MCP2515::arduinoTicksMs;
+    port.ctx             = this;
+}
+
+#endif /* MCP2515_HAVE_ARDUINO */
+
+MCP2515::MCP2515(const mcp2515_port_t *_port)
+{
+    port = *_port;
 }
 
 void MCP2515::startSPI() {
-    SPIn->beginTransaction(SPISettings(SPI_CLOCK, MSBFIRST, SPI_MODE0));
-    digitalWrite(SPICS, LOW);
+    port.select(port.ctx);
 }
 
 void MCP2515::endSPI() {
-    digitalWrite(SPICS, HIGH);
-    SPIn->endTransaction();
+    port.deselect(port.ctx);
+}
+
+uint8_t MCP2515::transfer(const uint8_t tx) {
+    return port.transfer(port.ctx, tx);
+}
+
+void MCP2515::transferBuffer(const uint8_t *tx, uint8_t *rx, const size_t len) {
+    if (port.transfer_buffer != nullptr) {
+        port.transfer_buffer(port.ctx, tx, rx, len);
+        return;
+    }
+    for (size_t i = 0; i < len; i++) {
+        uint8_t in = port.transfer(port.ctx, tx != nullptr ? tx[i] : 0x00);
+        if (rx != nullptr) {
+            rx[i] = in;
+        }
+    }
+}
+
+void MCP2515::delayMs(const uint32_t ms) {
+    port.delay_ms(port.ctx, ms);
+}
+
+uint32_t MCP2515::ticksMs() {
+    return port.ticks_ms(port.ctx);
 }
 
 MCP2515::ERROR MCP2515::reset(void)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_RESET);
+    transfer(INSTRUCTION_RESET);
     endSPI();
 
-    delay(10);
+    delayMs(10);
 
     uint8_t zeros[14];
     memset(zeros, 0, sizeof(zeros));
@@ -92,9 +169,9 @@ MCP2515::ERROR MCP2515::reset(void)
 uint8_t MCP2515::readRegister(const REGISTER reg)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_READ);
-    SPIn->transfer(reg);
-    uint8_t ret = SPIn->transfer(0x00);
+    transfer(INSTRUCTION_READ);
+    transfer(reg);
+    uint8_t ret = transfer(0x00);
     endSPI();
 
     return ret;
@@ -103,50 +180,46 @@ uint8_t MCP2515::readRegister(const REGISTER reg)
 void MCP2515::readRegisters(const REGISTER reg, uint8_t values[], const uint8_t n)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_READ);
-    SPIn->transfer(reg);
+    transfer(INSTRUCTION_READ);
+    transfer(reg);
     // mcp2515 has auto-increment of address-pointer
-    for (uint8_t i=0; i<n; i++) {
-        values[i] = SPIn->transfer(0x00);
-    }
+    transferBuffer(nullptr, values, n);
     endSPI();
 }
 
 void MCP2515::setRegister(const REGISTER reg, const uint8_t value)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_WRITE);
-    SPIn->transfer(reg);
-    SPIn->transfer(value);
+    transfer(INSTRUCTION_WRITE);
+    transfer(reg);
+    transfer(value);
     endSPI();
 }
 
 void MCP2515::setRegisters(const REGISTER reg, const uint8_t values[], const uint8_t n)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_WRITE);
-    SPIn->transfer(reg);
-    for (uint8_t i=0; i<n; i++) {
-        SPIn->transfer(values[i]);
-    }
+    transfer(INSTRUCTION_WRITE);
+    transfer(reg);
+    transferBuffer(values, nullptr, n);
     endSPI();
 }
 
 void MCP2515::modifyRegister(const REGISTER reg, const uint8_t mask, const uint8_t data)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_BITMOD);
-    SPIn->transfer(reg);
-    SPIn->transfer(mask);
-    SPIn->transfer(data);
+    transfer(INSTRUCTION_BITMOD);
+    transfer(reg);
+    transfer(mask);
+    transfer(data);
     endSPI();
 }
 
 uint8_t MCP2515::getStatus(void)
 {
     startSPI();
-    SPIn->transfer(INSTRUCTION_READ_STATUS);
-    uint8_t i = SPIn->transfer(0x00);
+    transfer(INSTRUCTION_READ_STATUS);
+    uint8_t i = transfer(0x00);
     endSPI();
 
     return i;
@@ -186,9 +259,11 @@ MCP2515::ERROR MCP2515::setMode(const CANCTRL_REQOP_MODE mode)
 {
     modifyRegister(MCP_CANCTRL, CANCTRL_REQOP | CANCTRL_OSM, mode);
 
-    unsigned long endTime = millis() + 10;
+    // Unsigned subtraction, so this stays correct across a tick-counter wrap;
+    // comparing against a precomputed `now + 10` does not.
+    const uint32_t startTime = ticksMs();
     bool modeMatch = false;
-    while (millis() < endTime) {
+    while ((ticksMs() - startTime) < 10) {
         uint8_t newmode = readRegister(MCP_CANSTAT);
         newmode &= CANSTAT_OPMOD;
 

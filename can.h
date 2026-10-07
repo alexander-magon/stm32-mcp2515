@@ -3,10 +3,16 @@
 
 #include <stdint.h>
 
+#ifndef __cplusplus
+#include <stdalign.h>   /* alignas is a keyword in C++, a macro in C11 */
+#endif
 
-typedef unsigned char __u8;
-typedef unsigned short __u16;
-typedef unsigned long __u32;
+/* Fixed-width, so canid_t stays 32-bit everywhere. `unsigned long` happens to
+ * be 32-bit on AVR and arm-none-eabi but is 64-bit on LP64 hosts, which
+ * silently changes the layout of struct can_frame when unit-testing natively. */
+typedef uint8_t  __u8;
+typedef uint16_t __u16;
+typedef uint32_t __u32;
 
 
 /* special address description flags for the CAN_ID */

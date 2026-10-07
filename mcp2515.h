@@ -1,8 +1,12 @@
 #ifndef _MCP2515_H_
 #define _MCP2515_H_
 
-#include <SPI.h>
+#include "mcp2515_port.h"
 #include "can.h"
+
+#if MCP2515_HAVE_ARDUINO
+#include <SPI.h>
+#endif
 
 /*
  *  Speed 8M
@@ -447,14 +451,35 @@ class MCP2515
             CANINTF  CANINTF_RXnIF;
         } RXB[N_RXBUFFERS];
 
+        mcp2515_port_t port;
+
+#if MCP2515_HAVE_ARDUINO
+        /*
+         * Backing state for the built-in Arduino port, used only when the
+         * library is constructed through the Arduino convenience constructor.
+         */
         uint8_t SPICS;
         uint32_t SPI_CLOCK;
         SPIClass * SPIn;
+
+        static void     arduinoSelect(void *ctx);
+        static void     arduinoDeselect(void *ctx);
+        static uint8_t  arduinoTransfer(void *ctx, uint8_t tx);
+        static void     arduinoDelayMs(void *ctx, uint32_t ms);
+        static uint32_t arduinoTicksMs(void *ctx);
+#endif
 
     private:
 
         void startSPI();
         void endSPI();
+
+        /* Thin wrappers over the port, so the protocol code below reads the
+         * same regardless of which backend is installed. */
+        uint8_t  transfer(const uint8_t tx);
+        void     transferBuffer(const uint8_t *tx, uint8_t *rx, const size_t len);
+        void     delayMs(const uint32_t ms);
+        uint32_t ticksMs();
 
         ERROR setMode(const CANCTRL_REQOP_MODE mode);
 
@@ -467,7 +492,22 @@ class MCP2515
         void prepareId(uint8_t *buffer, const bool ext, const uint32_t id);
     
     public:
+#if MCP2515_HAVE_ARDUINO
+        /*
+         * Arduino convenience constructor: installs a port backed by the
+         * Arduino SPI and digital-I/O APIs. Unchanged from upstream.
+         */
         MCP2515(const uint8_t _CS, const uint32_t _SPI_CLOCK = DEFAULT_SPI_CLOCK, SPIClass * _SPI = nullptr);
+#endif
+
+        /*
+         * Portable constructor: the application supplies the SPI, chip-select
+         * and timebase implementation. `_port` is copied, so it need not
+         * outlive this call, but whatever `_port->ctx` points at must outlive
+         * this object.
+         */
+        explicit MCP2515(const mcp2515_port_t *_port);
+
         ERROR reset(void);
         ERROR setConfigMode();
         ERROR setListenOnlyMode();

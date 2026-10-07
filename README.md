@@ -1,6 +1,15 @@
-Arduino MCP2515 CAN interface library
+MCP2515 CAN interface library
 ---------------------------------------------------------
-[![Build Status](https://travis-ci.org/autowp/arduino-mcp2515.svg?branch=master)](https://travis-ci.org/autowp/arduino-mcp2515)
+
+A portable MCP2515 driver, usable both as an Arduino library and as a plain
+CMake dependency on any other MCU.
+
+This is a fork of [autowp/arduino-mcp2515](https://github.com/autowp/arduino-mcp2515)
+that decouples the driver from the Arduino core. All I/O goes through a small
+callback struct (`mcp2515_port_t`) that the application fills in, so the
+library itself names no peripheral, vendor HAL or MCU family. The Arduino API
+is unchanged and still works exactly as before — see
+[Portable use](#portable-use-non-arduino) for everything else.
 
 <br>
 CAN-BUS is a common industrial bus because of its long travel distance, medium communication speed and high reliability. It is commonly found on modern machine tools and as an automotive diagnostic bus. This CAN-BUS Shield gives your Arduino/Seeeduino CAN-BUS capability. With an OBD-II converter cable added on and the OBD-II library imported, you are ready to build an onboard diagnostic device or data logger.
@@ -16,6 +25,7 @@ CAN-BUS is a common industrial bus because of its long travel distance, medium c
    * [Do It Yourself](#do-it-yourself)
 * [Software Usage](#software-usage)
    * [Library Installation](#library-installation)
+   * [Portable use (non-Arduino)](#portable-use-non-arduino)
    * [Initialization](#initialization)
    * [Frame data format](#frame-data-format)
    * [Send Data](#send-data)
@@ -51,6 +61,77 @@ Component References:
 1. Download the ZIP file from https://github.com/autowp/arduino-mcp2515/archive/master.zip
 2. From the Arduino IDE: Sketch -> Include Library... -> Add .ZIP Library...
 3. Restart the Arduino IDE to see the new "mcp2515" library with examples
+
+## Portable use (non-Arduino)
+
+The library auto-detects Arduino (via `ARDUINO` or `__has_include(<Arduino.h>)`).
+When it is absent, the Arduino constructor and its SPI backend are compiled
+out entirely and you construct the driver from a `mcp2515_port_t` instead.
+
+### Consuming with CMake
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(mcp2515
+    GIT_REPOSITORY https://github.com/alexander-magon/stm32-mcp2515
+    GIT_TAG        main
+)
+FetchContent_MakeAvailable(mcp2515)
+
+target_link_libraries(my_app PRIVATE mcp2515)
+```
+
+The driver is C++, so a C-only project must `enable_language(CXX)`. The port
+interface itself is plain C — your backend can be a `.c` file.
+
+### Writing a port
+
+Fill in the callbacks declared in [`mcp2515_port.h`](mcp2515_port.h):
+
+| Callback          | Required | Purpose                                              |
+|-------------------|----------|------------------------------------------------------|
+| `select`          | yes      | Assert CS; acquire the bus / apply SPI settings      |
+| `deselect`        | yes      | Release CS; release the bus                          |
+| `transfer`        | yes      | Full-duplex transfer of one byte                     |
+| `transfer_buffer` | no       | Block transfer; falls back to a `transfer` loop      |
+| `delay_ms`        | yes      | Block for ≥ N ms (should yield under an RTOS)        |
+| `ticks_ms`        | yes      | Free-running ms counter; may wrap                    |
+
+`ctx` is passed back to every callback and is never interpreted by the driver.
+
+```c
+/* my_mcp2515_port.c -- application-side, names your HAL, not the library's */
+static void     port_select(void *ctx)   { /* CS low,  take mutex */ }
+static void     port_deselect(void *ctx) { /* CS high, give mutex */ }
+static uint8_t  port_transfer(void *ctx, uint8_t tx) { /* one byte */ }
+static void     port_delay_ms(void *ctx, uint32_t ms) { /* osDelay */ }
+static uint32_t port_ticks_ms(void *ctx) { /* HAL_GetTick, xTaskGetTickCount, ... */ }
+
+const mcp2515_port_t my_port = {
+    .select   = port_select,   .deselect = port_deselect,
+    .transfer = port_transfer, .transfer_buffer = NULL,
+    .delay_ms = port_delay_ms, .ticks_ms = port_ticks_ms,
+    .ctx      = &my_spi_state,
+};
+```
+
+```C++
+MCP2515 mcp2515(&my_port);   // instead of MCP2515(CS_PIN)
+```
+
+Requirements your port must satisfy, regardless of MCU:
+
+- **SPI mode 0, MSB first.** The MCP2515 supports modes 0,0 and 1,1; this
+  driver assumes 0,0.
+- **SCK ≤ 10 MHz.** Exceeding it yields intermittently corrupt reads rather
+  than a clean failure.
+- **CS is a plain GPIO output.** Do not use hardware NSS — the driver holds CS
+  low across multi-byte sequences, which hardware NSS typically will not do.
+- **Implement `transfer_buffer` if single-byte transfers are expensive.** The
+  driver moves up to 14 bytes per transaction, and a full CAN frame is 13.
+- **Serialize access if the bus is shared.** The Arduino backend got this from
+  `beginTransaction`/`endTransaction`; a bare-metal port gets nothing unless
+  you add it.
 
 ## Initialization
 

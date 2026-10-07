@@ -1,0 +1,13 @@
+# CMake build trees
+build/
+build-*/
+cmake-build-*/
+_deps/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.a
+*.o
+*.obj
+*.su
