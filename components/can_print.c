@@ -723,6 +723,20 @@ void CanPrint_MuteChanging(void)
             (unsigned) muted, (unsigned) (can_print_table_used - muted));
 }
 
+void CanPrint_MuteKnown(void)
+{
+    uint16_t muted = 0U;
+
+    for (uint16_t i = 0; i < can_print_table_used; i++) {
+        if (can_print_table[i].muted == 0U) {
+            can_print_table[i].muted = 1U;
+            muted++;
+        }
+    }
+    CAN_OUT("-- muted %u known ids; only identifiers not seen before will print --\r\n",
+            (unsigned) muted);
+}
+
 void CanPrint_UnmuteAll(void)
 {
     for (uint16_t i = 0; i < can_print_table_used; i++) {

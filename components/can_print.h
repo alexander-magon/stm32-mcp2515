@@ -145,6 +145,24 @@ void CanPrint_ClearFilters(void);
  */
 void CanPrint_MuteChanging(void);
 
+/*
+ * Mute every identifier currently known, whether it has changed or not.
+ *
+ * Called at the end of the learn window this turns the tracer into a pure
+ * newcomer detector: everything that was talking during learning falls silent
+ * for good, and the only thing that can print afterwards is an identifier that
+ * was never heard before -- announced on arrival, then followed through its
+ * payload changes as usual.
+ *
+ * Useful when the control being hunted makes a module start transmitting
+ * something it was not transmitting before. It will NOT find a control whose
+ * frame is already on the bus in an idle state -- a steering wheel that
+ * broadcasts "no button" continuously is learned like anything else, so its
+ * identifier gets muted here. Change detection is the right tool for that
+ * case, and this one for the other.
+ */
+void CanPrint_MuteKnown(void);
+
 /* Restore every muted identifier and refill all budgets. */
 void CanPrint_UnmuteAll(void);
 
