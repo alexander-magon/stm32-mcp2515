@@ -35,26 +35,8 @@ static uint32_t can_print_now(void)
     return (can_print_clock != NULL) ? can_print_clock() : 0U;
 }
 
-/* Length of the current learn window, kept so it can be re-based below. */
-static uint32_t can_print_learn_window = CAN_PRINT_LEARN_MS;
-
-void CanPrint_SetClock(uint32_t (*now_ms)(void))
-{
-    can_print_clock = now_ms;
-
-    /*
-     * Re-base a learn window that was armed before a clock existed.
-     *
-     * CanPrint_SetMode() may legitimately run before the clock is installed,
-     * in which case can_print_now() returned 0 and the deadline became an
-     * absolute tick rather than an offset from now -- truncating the window,
-     * or expiring it outright if the system had already been up that long.
-     * Re-basing here makes the two calls order-independent.
-     */
-    if (can_print_learning && now_ms != NULL) {
-        can_print_learn_until = now_ms() + can_print_learn_window;
-    }
-}
+/* CanPrint_SetClock() is defined further down, next to the learn-window state
+ * it has to re-base. */
 
 /* Set to 0 to drop the ISO-TP/UDS tables and annotations (~1 kB of flash). */
 #ifndef CAN_PRINT_DECODE_DIAGNOSTICS
@@ -386,6 +368,27 @@ static uint32_t         can_print_learn_until;
 static bool             can_print_learning;
 static uint8_t          can_print_budget = CAN_PRINT_CHANGE_BUDGET;
 static bool             can_print_verbose_on = true;
+
+/* Length of the current learn window, kept so CanPrint_SetClock() can re-base it. */
+static uint32_t         can_print_learn_window = CAN_PRINT_LEARN_MS;
+
+void CanPrint_SetClock(uint32_t (*now_ms)(void))
+{
+    can_print_clock = now_ms;
+
+    /*
+     * Re-base a learn window that was armed before a clock existed.
+     *
+     * CanPrint_SetMode() may legitimately run before the clock is installed,
+     * in which case can_print_now() returned 0 and the deadline became an
+     * absolute tick rather than an offset from now -- truncating the window,
+     * or expiring it outright if the system had already been up that long.
+     * Re-basing here makes the two calls order-independent.
+     */
+    if (can_print_learning && now_ms != NULL) {
+        can_print_learn_until = now_ms() + can_print_learn_window;
+    }
+}
 
 static bool can_print_list_has(const can_print_filter_t *list, size_t n,
                                uint32_t id, bool extended)
