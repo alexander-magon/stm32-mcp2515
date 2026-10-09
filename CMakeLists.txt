@@ -77,10 +77,12 @@ target_compile_features(mcp2515 PUBLIC cxx_std_11)
 # the driver uses neither. Only applied when we are clearly cross-compiling to
 # a bare-metal target, so a host unit-test build keeps project defaults.
 if(CMAKE_CROSSCOMPILING AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Guarded per-language: -fno-rtti and -fno-threadsafe-statics are C++-only,
+    # and GCC warns on every C translation unit if they are applied globally.
     target_compile_options(mcp2515 PRIVATE
-        -fno-rtti
-        -fno-exceptions
-        -fno-threadsafe-statics
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
     )
 endif()
 
