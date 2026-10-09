@@ -35,9 +35,25 @@ static uint32_t can_print_now(void)
     return (can_print_clock != NULL) ? can_print_clock() : 0U;
 }
 
+/* Length of the current learn window, kept so it can be re-based below. */
+static uint32_t can_print_learn_window = CAN_PRINT_LEARN_MS;
+
 void CanPrint_SetClock(uint32_t (*now_ms)(void))
 {
     can_print_clock = now_ms;
+
+    /*
+     * Re-base a learn window that was armed before a clock existed.
+     *
+     * CanPrint_SetMode() may legitimately run before the clock is installed,
+     * in which case can_print_now() returned 0 and the deadline became an
+     * absolute tick rather than an offset from now -- truncating the window,
+     * or expiring it outright if the system had already been up that long.
+     * Re-basing here makes the two calls order-independent.
+     */
+    if (can_print_learning && now_ms != NULL) {
+        can_print_learn_until = now_ms() + can_print_learn_window;
+    }
 }
 
 /* Set to 0 to drop the ISO-TP/UDS tables and annotations (~1 kB of flash). */
@@ -659,8 +675,9 @@ void CanPrint_Relearn(uint32_t learn_ms)
         can_print_table[i].spent    = 0U;
         can_print_table[i].muted    = 0U;
     }
-    can_print_learn_until = can_print_now() + window;
-    can_print_learning    = true;
+    can_print_learn_window = window;
+    can_print_learn_until  = can_print_now() + window;
+    can_print_learning     = true;
 
     CAN_OUT("-- learning for %lu ms: leave the car alone --\r\n",
             (unsigned long) window);
