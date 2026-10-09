@@ -19,6 +19,7 @@
 
 #include "can_print.h"
 
+#include <stdarg.h>   /* va_list in can_print_append; not implied by stdio.h */
 #include <stdio.h>
 #include <string.h>
 
