@@ -119,6 +119,56 @@ extern "C" can_bus_status_t CanBus_SetIdFilter(uint32_t mask, uint32_t id, bool 
                                      : g_mcp->setNormalMode());
 }
 
+extern "C" can_bus_status_t CanBus_SetFilters(const can_bus_filter_t *filters, uint8_t count)
+{
+    if (g_mcp == nullptr || filters == nullptr ||
+        count == 0U || count > CAN_BUS_MAX_FILTERS) {
+        return CAN_BUS_ERR_FAIL;
+    }
+
+    /* One mask serves filters 0-1 and the other 2-5, and the two mask layouts
+     * differ between 11- and 29-bit matching, so the set has to be uniform. */
+    for (uint8_t i = 1U; i < count; i++) {
+        if (filters[i].extended != filters[0].extended) {
+            return CAN_BUS_ERR_FAIL;
+        }
+    }
+
+    const bool     extended = filters[0].extended;
+    const uint32_t mask     = extended ? 0x1FFFFFFFUL : 0x7FFUL;
+
+    const bool was_listen_only =
+        (g_mcp->getControlRegister() & 0xE0) == 0x60; /* CANCTRL REQOP = listen-only */
+
+    if (g_mcp->setConfigMode() != MCP2515::ERROR_OK) {
+        return CAN_BUS_ERR_FAIL;
+    }
+
+    /* Full mask: every identifier bit must match, so each filter is an exact
+     * identifier rather than a range. */
+    const MCP2515::MASK masks[] = {MCP2515::MASK0, MCP2515::MASK1};
+    for (MCP2515::MASK m : masks) {
+        if (g_mcp->setFilterMask(m, extended, mask) != MCP2515::ERROR_OK) {
+            return CAN_BUS_ERR_FAIL;
+        }
+    }
+
+    const MCP2515::RXF slots[] = {MCP2515::RXF0, MCP2515::RXF1, MCP2515::RXF2,
+                                  MCP2515::RXF3, MCP2515::RXF4, MCP2515::RXF5};
+    for (uint8_t i = 0U; i < CAN_BUS_MAX_FILTERS; i++) {
+        /* Pad the spare slots by repeating the first entry. Leaving them at
+         * zero under a full mask would quietly accept identifier 0x000. */
+        const uint32_t id = (i < count) ? filters[i].id : filters[0].id;
+
+        if (g_mcp->setFilter(slots[i], extended, id) != MCP2515::ERROR_OK) {
+            return CAN_BUS_ERR_FAIL;
+        }
+    }
+
+    return map_error(was_listen_only ? g_mcp->setListenOnlyMode()
+                                     : g_mcp->setNormalMode());
+}
+
 extern "C" can_bus_status_t CanBus_AcceptAll(void)
 {
     /* An all-zero mask makes every ID bit a don't-care. */

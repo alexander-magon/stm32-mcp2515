@@ -103,6 +103,39 @@ can_bus_status_t CanBus_SetIdFilter(uint32_t mask, uint32_t id, bool extended);
 /* Undo CanBus_SetIdFilter: accept every ID again (the post-Init default). */
 can_bus_status_t CanBus_AcceptAll(void);
 
+/*
+ * Accept an explicit set of identifiers, exactly, and nothing else.
+ *
+ * This is the only filtering that costs nothing: the controller compares the
+ * identifier as the frame arrives and a rejected frame never occupies an RX
+ * buffer, never triggers an SPI read, and cannot contribute to overflow.
+ * Filtering in software cannot do any of that -- by then the frame has already
+ * been buffered and fetched.
+ *
+ * The hardware provides six acceptance filters and two masks, so `count` must
+ * be 1..CAN_BUS_MAX_FILTERS. Fewer than six is fine; the spare slots are
+ * padded with a repeat of the first entry so they cannot accept anything
+ * unintended.
+ *
+ * All entries must share the same `extended` setting: the two masks are
+ * partitioned between the receive buffers (filters 0-1 use one, 2-5 the
+ * other) and a mask's layout differs between 11- and 29-bit matching, so a
+ * mixed set cannot be expressed. Mixed sets return CAN_BUS_ERR_FAIL.
+ *
+ * There is no hardware way to express the opposite -- "reject these N" -- so a
+ * deny list of any size has to stay in software.
+ *
+ * Listen-only is preserved across the change.
+ */
+#define CAN_BUS_MAX_FILTERS 6U
+
+typedef struct {
+    uint32_t id;
+    bool     extended;
+} can_bus_filter_t;
+
+can_bus_status_t CanBus_SetFilters(const can_bus_filter_t *filters, uint8_t count);
+
 /* Queue a frame into the first free TX buffer. */
 can_bus_status_t CanBus_Send(const struct can_frame *frame);
 
