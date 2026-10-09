@@ -109,6 +109,17 @@ void CanPrint_SetMode(can_print_mode_t mode);
 void CanPrint_Relearn(uint32_t learn_ms);
 
 /*
+ * True while the learn window is still open.
+ *
+ * Exposed so a caller can align its own bookkeeping with the same window --
+ * e.g. accumulating per-identifier frame rates during learning and reporting
+ * them once it closes. Polling this for the true->false edge is more robust
+ * than recomputing the deadline from CAN_PRINT_LEARN_MS, which CanPrint_Relearn()
+ * may have overridden.
+ */
+bool CanPrint_IsLearning(void);
+
+/*
  * Software identifier filter, applied before anything is printed.
  *
  * With an empty watch list every identifier is considered; adding even one

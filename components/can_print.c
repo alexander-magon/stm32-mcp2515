@@ -635,6 +635,11 @@ void CanPrint_SetVerbose(bool verbose)
     can_print_verbose_on = verbose;
 }
 
+bool CanPrint_IsLearning(void)
+{
+    return can_print_learning;
+}
+
 void CanPrint_SetMode(can_print_mode_t mode)
 {
     can_print_mode = mode;
