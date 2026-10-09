@@ -26,16 +26,48 @@ option(MCP2515_BUILD_AS_OBJECT
 links a custom startup/linker setup and wants the objects forwarded directly)"
     OFF)
 
+#
+# Optional components, under components/. They are hardware-independent like
+# the driver itself, but unlike the driver they are not needed to talk to an
+# MCP2515, so each can be switched off.
+#
+# They live in a subdirectory on purpose: the Arduino 1.0 library layout
+# compiles only the root (and utility/), so a sketch is unaffected by their
+# presence no matter what these options are set to.
+#
+option(MCP2515_BUILD_C_API
+    "Build components/can_bus: a C facade owning the controller instance, so \
+a C-only application never has to compile C++ of its own"
+    ON)
+
+option(MCP2515_BUILD_TRACE
+    "Build components/can_print: frame formatting, ISO-TP/UDS decoding and \
+change detection for reverse-engineering an unknown bus"
+    OFF)
+
+set(MCP2515_SOURCES mcp2515.cpp)
+
+if(MCP2515_BUILD_C_API)
+    list(APPEND MCP2515_SOURCES components/can_bus.cpp)
+endif()
+
+if(MCP2515_BUILD_TRACE)
+    list(APPEND MCP2515_SOURCES components/can_print.c)
+    # can_print.c is C; the driver and facade are C++.
+    enable_language(C)
+endif()
+
 if(MCP2515_BUILD_AS_OBJECT)
-    add_library(mcp2515 OBJECT mcp2515.cpp)
+    add_library(mcp2515 OBJECT ${MCP2515_SOURCES})
 else()
-    add_library(mcp2515 STATIC mcp2515.cpp)
+    add_library(mcp2515 STATIC ${MCP2515_SOURCES})
 endif()
 
 add_library(mcp2515::mcp2515 ALIAS mcp2515)
 
 target_include_directories(mcp2515 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/components>
     $<INSTALL_INTERFACE:include>
 )
 
@@ -66,12 +98,18 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         EXPORT  mcp2515Targets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
-    install(FILES
+    set(MCP2515_HEADERS
         ${CMAKE_CURRENT_SOURCE_DIR}/mcp2515.h
         ${CMAKE_CURRENT_SOURCE_DIR}/mcp2515_port.h
         ${CMAKE_CURRENT_SOURCE_DIR}/can.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
+    if(MCP2515_BUILD_C_API)
+        list(APPEND MCP2515_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/components/can_bus.h)
+    endif()
+    if(MCP2515_BUILD_TRACE)
+        list(APPEND MCP2515_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/components/can_print.h)
+    endif()
+    install(FILES ${MCP2515_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     install(EXPORT mcp2515Targets
         FILE        mcp2515Targets.cmake
         NAMESPACE   mcp2515::

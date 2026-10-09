@@ -84,6 +84,46 @@ target_link_libraries(my_app PRIVATE mcp2515)
 The driver is C++, so a C-only project must `enable_language(CXX)`. The port
 interface itself is plain C — your backend can be a `.c` file.
 
+### Optional components
+
+`components/` holds hardware-independent code that is useful with the driver
+but not needed to talk to an MCP2515. Each is a CMake option. They live in a
+subdirectory so the Arduino 1.0 library layout (which compiles only the root)
+ignores them entirely — sketches are unaffected whatever these are set to.
+
+| Option | Default | Provides |
+|---|---|---|
+| `MCP2515_BUILD_C_API` | `ON` | `components/can_bus.*` — a C facade that owns the controller instance, so a C-only application never compiles C++ of its own. `CanBus_Init/Send/Receive/SetListenOnly/SetIdFilter/...` |
+| `MCP2515_BUILD_TRACE` | `OFF` | `components/can_print.*` — frame formatting, ISO-TP/UDS decoding, and change detection for reverse-engineering an unknown bus |
+
+```cmake
+set(MCP2515_BUILD_TRACE ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(mcp2515)
+```
+
+The trace component needs only a millisecond clock and `printf`:
+
+```c
+CanPrint_SetClock(HAL_GetTick);         /* or any ms source; may wrap */
+CanPrint_SetMode(CAN_PRINT_MODE_CHANGES);
+...
+CanPrint_Feed(&frame);                  /* however you collected it */
+```
+
+How frames are collected is the caller's business — polled from a task, drained
+from an interrupt, or replayed from a capture in a host test. Route output
+elsewhere by defining `CAN_PRINT_PRINTF`.
+
+**Change detection** is the reason this exists. On a live vehicle bus a raw
+dump is unreadable — a VW powertrain bus exceeds 1000 frames/s against a UART
+that fits ~160 lines/s. `CAN_PRINT_MODE_CHANGES` runs a learn window that
+records which bytes of each identifier habitually move (rolling counters and
+checksums, which on a VW occupy bytes 0–1 of roughly half the identifiers),
+then reports only bytes that were stable through learning. Each identifier gets
+a small budget of change lines before muting itself, so output falls silent on
+its own. Measured on a real capture: 2346 frames in, 161 lines out, flat
+regardless of how long it runs.
+
 ### Writing a port
 
 Fill in the callbacks declared in [`mcp2515_port.h`](mcp2515_port.h):
